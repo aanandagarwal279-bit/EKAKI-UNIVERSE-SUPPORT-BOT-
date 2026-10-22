@@ -1,4 +1,5 @@
 import os
+import re
 import random
 from flask import Flask
 from threading import Thread
@@ -27,7 +28,7 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v6",
+    "ekaki_support_bot_final_v7",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
@@ -91,7 +92,6 @@ async def handle_user_msg(client: Client, message: Message):
     topic_id = user_topics.get(user_id)
     is_new_ticket = False
 
-    # Create Single Persistent Forum Topic if not exists
     if not topic_id:
         try:
             is_new_ticket = True
@@ -142,14 +142,13 @@ async def handle_user_msg(client: Client, message: Message):
         except Exception as e:
             print(f"COPY ERROR: {e}")
 
-    # FIX: Show "Message Received" ONLY on the very first message when ticket opens!
-    if sent:
-        if is_new_ticket:
-            await message.reply_text(
-                "✅ **Message Received!** 🚀\n\n"
-                "💬 Aapka message hamari support team tak pahunch gaya hai. Hum jald hi reply karenge! ✨"
-            )
-    else:
+    # Show confirmation message ONLY once when new ticket opens
+    if sent and is_new_ticket:
+        await message.reply_text(
+            "✅ **Message Received!** 🚀\n\n"
+            "💬 Aapka message hamari support team tak pahunch gaya hai. Hum jald hi reply karenge! ✨"
+        )
+    elif not sent:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚨 Report Issue / Complaint", callback_data="report_issue")]])
         await message.reply_text("❌ Message delivery failed!", reply_markup=btn)
 
@@ -159,10 +158,10 @@ async def handle_admin_actions(client: Client, message: Message):
         return
 
     topic_id = getattr(message, "reply_to_message_id", None) or getattr(message, "message_thread_id", None)
-    text = (message.text or message.caption or "").strip().lower()
+    text = (message.text or message.caption or "").strip()
 
-    # Global Commands
-    if text.startswith("/broadcast") and message.reply_to_message:
+    # Global Broadcast Command
+    if text.lower().startswith("/broadcast") and message.reply_to_message:
         success = 0
         fail = 0
         bc_msg = message.reply_to_message
@@ -175,7 +174,8 @@ async def handle_admin_actions(client: Client, message: Message):
         await message.reply_text(f"📢 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed: {fail}")
         return
 
-    if text.startswith("/stats"):
+    # Global Stats Command
+    if text.lower().startswith("/stats"):
         await message.reply_text(
             f"📈 **Bot Statistics:**\n"
             f"👥 Total Users: {len(all_users)}\n"
@@ -187,73 +187,69 @@ async def handle_admin_actions(client: Client, message: Message):
     if not topic_id:
         return
 
-    # Fallback: If bot restarted, auto-map topic if it's missing from memory dictionary
-    if topic_id not in topic_users:
-        topic_users[topic_id] = 000000  # fallback safety
-
     target_user_id = topic_users.get(topic_id)
 
-    # Commands Inside Topic
-    if text.startswith("/close"):
-        try:
-            if target_user_id and target_user_id != 000000:
-                if target_user_id in user_topics:
-                    del user_topics[target_user_id]
+    # Backup: Extract User ID directly if topic mapping is missing
+    if not target_user_id or target_user_id == 0:
+        if message.reply_to_message and message.reply_to_message.text:
+            match = re.search(r"ID:\s*`?(\d+)`?", message.reply_to_message.text)
+            if match:
+                target_user_id = int(match.group(1))
+
+    # Topic Commands
+    if text.lower().startswith("/close"):
+        if target_user_id:
+            user_topics.pop(target_user_id, None)
+            topic_users.pop(topic_id, None)
+            try:
                 await client.send_message(
                     chat_id=target_user_id,
                     text="🔒 **Your support ticket has been closed.** Contact us again anytime if you need help!"
                 )
-            if topic_id in topic_users:
-                del topic_users[topic_id]
-            await message.reply_text("🔒 **Ticket Closed Successfully!**")
-        except Exception as e:
-            print(f"CLOSE ERROR: {e}")
+            except Exception:
+                pass
+        await message.reply_text("🔒 **Ticket Closed Successfully!**")
         return
 
-    if text.startswith("/block"):
-        if target_user_id and target_user_id != 000000:
+    if text.lower().startswith("/block"):
+        if target_user_id:
             blocked_users.add(target_user_id)
             await message.reply_text(f"🚫 User `{target_user_id}` has been blocked.")
         else:
-            await message.reply_text("⚠️ Could not identify user for this topic.")
+            await message.reply_text("⚠️ Target User ID not found.")
         return
 
-    if text.startswith("/unblock"):
-        if target_user_id and target_user_id != 000000:
-            if target_user_id in blocked_users:
-                blocked_users.remove(target_user_id)
-                await message.reply_text(f"✅ User `{target_user_id}` has been unblocked.")
-            else:
-                await message.reply_text("⚠️ User is not blocked.")
+    if text.lower().startswith("/unblock"):
+        if target_user_id:
+            blocked_users.discard(target_user_id)
+            await message.reply_text(f"✅ User `{target_user_id}` has been unblocked.")
         else:
-            await message.reply_text("⚠️ Could not identify user.")
+            await message.reply_text("⚠️ Target User ID not found.")
         return
 
-    if text.startswith("/userinfo"):
+    if text.lower().startswith("/userinfo"):
+        status = "Blocked" if target_user_id in blocked_users else "Active"
         await message.reply_text(
             f"📊 **User Details:**\n"
-            f"🆔 User ID: `{target_user_id}`\n"
+            f"🆔 User ID: `{target_user_id or 'Unknown'}`\n"
             f"📌 Topic ID: `{topic_id}`\n"
-            f"🚫 Blocked Status: {target_user_id in blocked_users if target_user_id else 'Unknown'}"
+            f"🚫 Status: {status}"
         )
         return
 
-    if not target_user_id or target_user_id == 000000:
-        await message.reply_text("⚠️ Error: Is topic ke user ka data memory mein nahi mila (bot restart hua hoga). Naye message par ye theek ho jayega.")
-        return
-
-    # Anonymous Admin Reply
-    try:
-        await client.copy_message(
-            chat_id=target_user_id,
-            from_chat_id=message.chat.id,
-            message_id=message.id
-        )
-    except Exception as e:
-        print(f"ADMIN REPLY ERROR: {e}")
+    # Anonymous Admin Reply to User
+    if target_user_id:
+        try:
+            await client.copy_message(
+                chat_id=target_user_id,
+                from_chat_id=message.chat.id,
+                message_id=message.id
+            )
+        except Exception as e:
+            print(f"ADMIN REPLY ERROR: {e}")
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
-    print("Starting EKAKI Support Bot Client with optimized UX...")
+    print("Starting EKAKI Support Bot Client...")
     bot.run()
-            
+    
