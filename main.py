@@ -1,8 +1,9 @@
 import os
 import random
+import asyncio
 from flask import Flask
 from threading import Thread
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.raw import functions
 
@@ -227,8 +228,16 @@ async def handle_admin_actions(client: Client, message: Message):
     except Exception as e:
         print(f"ADMIN REPLY ERROR: {e}")
 
-if __name__ == "__main__":
-    Thread(target=run_flask).start()
+async def main():
+    # Flask Web Server
+    Thread(target=run_flask, daemon=True).start()
     print("Starting Final EKAKI Support Bot Client...")
-    bot.run()
-              
+    
+    # Start Pyrogram Client Async
+    await bot.start()
+    await idle()
+    await bot.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
