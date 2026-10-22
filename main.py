@@ -1,20 +1,8 @@
 import os
 import random
-from flask import Flask
-from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.raw import functions
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "EKAKI Support Bot is Live!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
 
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
@@ -27,18 +15,17 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v1",
+    "ekaki_support_bot_final_v2",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
 )
 
-# State Tracking
-user_topics = {}          # user_id -> topic_id
-topic_users = {}          # topic_id -> user_id
-blocked_users = set()     # set of blocked user_ids
-all_users = set()         # set of all unique user_ids
-awaiting_report = set()   # users in report mode
+user_topics = {}
+topic_users = {}
+blocked_users = set()
+all_users = set()
+awaiting_report = set()
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: Client, message: Message):
@@ -65,12 +52,10 @@ async def handle_user_msg(client: Client, message: Message):
     user_name = message.from_user.first_name or "User"
     all_users.add(user_id)
 
-    # Check if user is blocked
     if user_id in blocked_users:
         await message.reply_text("❌ You are blocked from contacting support.")
         return
 
-    # Check if message is a Complaint Report
     if user_id in awaiting_report:
         awaiting_report.remove(user_id)
         if LOG_GROUP_ID != 0:
@@ -84,7 +69,7 @@ async def handle_user_msg(client: Client, message: Message):
                 await message.reply_text("✅ **Report Sent!** Hamari technical team ko aapki report mil gayi hai.")
                 return
             except Exception as e:
-                print(f"REPORT FORWARD ERROR: {e}")
+                print(f"REPORT ERROR: {e}")
 
     if LOG_GROUP_ID == 0:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚨 Report Issue / Complaint", callback_data="report_issue")]])
@@ -93,7 +78,6 @@ async def handle_user_msg(client: Client, message: Message):
 
     topic_id = user_topics.get(user_id)
 
-    # Create Single Persistent Forum Topic if not exists
     if not topic_id:
         try:
             chat_obj = await client.get_chat(LOG_GROUP_ID)
@@ -130,16 +114,14 @@ async def handle_user_msg(client: Client, message: Message):
         except Exception as e:
             print(f"TOPIC CREATION ERROR: {e}")
 
-    # Copy Message into Topic
     sent = False
     if topic_id:
         try:
             await message.copy(chat_id=LOG_GROUP_ID, message_thread_id=topic_id)
             sent = True
         except Exception as e:
-            print(f"COPY TO TOPIC ERROR: {e}")
+            print(f"COPY ERROR: {e}")
 
-    # Delivery Feedback
     if sent:
         await message.reply_text(
             "✅ **Message Received!** 🚀\n\n"
@@ -157,7 +139,6 @@ async def handle_admin_actions(client: Client, message: Message):
     topic_id = getattr(message, "message_thread_id", None)
     text = message.text or message.caption or ""
 
-    # Global Commands
     if text.startswith("/broadcast") and message.reply_to_message:
         success = 0
         fail = 0
@@ -185,7 +166,6 @@ async def handle_admin_actions(client: Client, message: Message):
 
     target_user_id = topic_users[topic_id]
 
-    # Commands Inside Topic
     if text.startswith("/close"):
         try:
             del user_topics[target_user_id]
@@ -221,16 +201,12 @@ async def handle_admin_actions(client: Client, message: Message):
         )
         return
 
-    # Anonymous Admin Reply
     try:
         await message.copy(chat_id=target_user_id)
     except Exception as e:
         print(f"ADMIN REPLY ERROR: {e}")
 
 if __name__ == "__main__":
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    print("Starting Final EKAKI Support Bot Client...")
+    print("Starting EKAKI Support Bot...")
     bot.run()
     
