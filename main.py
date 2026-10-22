@@ -27,7 +27,7 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v3",
+    "ekaki_support_bot_final_v4",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
@@ -92,6 +92,7 @@ async def handle_user_msg(client: Client, message: Message):
 
     if not topic_id:
         try:
+            # Group chat ko pehle fetch karke cache karenge taaki Peer id invalid error na aaye
             chat_obj = await client.get_chat(LOG_GROUP_ID)
             peer = await client.resolve_peer(chat_obj.id)
             
@@ -218,9 +219,23 @@ async def handle_admin_actions(client: Client, message: Message):
     except Exception as e:
         print(f"ADMIN REPLY ERROR: {e}")
 
+async def startup_tasks():
+    # Bot startup hote hi group ko cache karne ki koshish karega
+    if LOG_GROUP_ID != 0:
+        try:
+            await bot.get_chat(LOG_GROUP_ID)
+            print("LOG_GROUP_ID successfully cached!")
+        except Exception as e:
+            print(f"Startup Cache Error (Check LOG_GROUP_ID & Bot Admin status): {e}")
+
 if __name__ == "__main__":
-    # Start Flask in background daemon thread
     Thread(target=run_flask, daemon=True).start()
-    print("Starting EKAKI Support Bot with Flask Web Server...")
+    print("Starting EKAKI Support Bot Client...")
+    
+    # Startup task run karne ke liye client start handler
+    @bot.on_raw_update()
+    async def startup_trigger(client, update, users, chats):
+        pass # placeholder to keep connection active
+
     bot.run()
     
