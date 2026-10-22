@@ -1,8 +1,20 @@
 import os
 import random
+from flask import Flask
+from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.raw import functions
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "EKAKI Support Bot is Live!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
@@ -15,7 +27,7 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v2",
+    "ekaki_support_bot_final_v3",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
@@ -207,6 +219,8 @@ async def handle_admin_actions(client: Client, message: Message):
         print(f"ADMIN REPLY ERROR: {e}")
 
 if __name__ == "__main__":
-    print("Starting EKAKI Support Bot...")
+    # Start Flask in background daemon thread
+    Thread(target=run_flask, daemon=True).start()
+    print("Starting EKAKI Support Bot with Flask Web Server...")
     bot.run()
     
