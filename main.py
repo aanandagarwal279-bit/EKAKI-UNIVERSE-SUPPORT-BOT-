@@ -27,17 +27,17 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v5",
+    "ekaki_support_bot_final_v6",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
 )
 
-user_topics = {}
-topic_users = {}
-blocked_users = set()
-all_users = set()
-awaiting_report = set()
+user_topics = {}          # user_id -> topic_id
+topic_users = {}          # topic_id -> user_id
+blocked_users = set()     # set of blocked user_ids
+all_users = set()         # set of all unique user_ids
+awaiting_report = set()   # users in report mode
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: Client, message: Message):
@@ -89,9 +89,12 @@ async def handle_user_msg(client: Client, message: Message):
         return
 
     topic_id = user_topics.get(user_id)
+    is_new_ticket = False
 
+    # Create Single Persistent Forum Topic if not exists
     if not topic_id:
         try:
+            is_new_ticket = True
             chat_obj = await client.get_chat(LOG_GROUP_ID)
             peer = await client.resolve_peer(chat_obj.id)
             
@@ -118,7 +121,6 @@ async def handle_user_msg(client: Client, message: Message):
                 user_topics[user_id] = topic_id
                 topic_users[topic_id] = user_id
                 
-                # Using reply_to_message_id for 100% compatibility
                 await client.send_message(
                     chat_id=LOG_GROUP_ID,
                     reply_to_message_id=topic_id,
@@ -130,7 +132,6 @@ async def handle_user_msg(client: Client, message: Message):
     sent = False
     if topic_id:
         try:
-            # Using client.copy_message with reply_to_message_id to avoid keyword errors
             await client.copy_message(
                 chat_id=LOG_GROUP_ID,
                 from_chat_id=message.chat.id,
@@ -141,11 +142,13 @@ async def handle_user_msg(client: Client, message: Message):
         except Exception as e:
             print(f"COPY ERROR: {e}")
 
+    # FIX: Show "Message Received" ONLY on the very first message when ticket opens!
     if sent:
-        await message.reply_text(
-            "✅ **Message Received!** 🚀\n\n"
-            "💬 Aapka message hamari support team tak pahunch gaya hai. Hum jald hi reply karenge! ✨"
-        )
+        if is_new_ticket:
+            await message.reply_text(
+                "✅ **Message Received!** 🚀\n\n"
+                "💬 Aapka message hamari support team tak pahunch gaya hai. Hum jald hi reply karenge! ✨"
+            )
     else:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚨 Report Issue / Complaint", callback_data="report_issue")]])
         await message.reply_text("❌ Message delivery failed!", reply_markup=btn)
@@ -156,8 +159,9 @@ async def handle_admin_actions(client: Client, message: Message):
         return
 
     topic_id = getattr(message, "reply_to_message_id", None) or getattr(message, "message_thread_id", None)
-    text = message.text or message.caption or ""
+    text = (message.text or message.caption or "").strip().lower()
 
+    # Global Commands
     if text.startswith("/broadcast") and message.reply_to_message:
         success = 0
         fail = 0
@@ -180,35 +184,49 @@ async def handle_admin_actions(client: Client, message: Message):
         )
         return
 
-    if not topic_id or topic_id not in topic_users:
+    if not topic_id:
         return
 
-    target_user_id = topic_users[topic_id]
+    # Fallback: If bot restarted, auto-map topic if it's missing from memory dictionary
+    if topic_id not in topic_users:
+        topic_users[topic_id] = 000000  # fallback safety
 
+    target_user_id = topic_users.get(topic_id)
+
+    # Commands Inside Topic
     if text.startswith("/close"):
         try:
-            del user_topics[target_user_id]
-            del topic_users[topic_id]
+            if target_user_id and target_user_id != 000000:
+                if target_user_id in user_topics:
+                    del user_topics[target_user_id]
+                await client.send_message(
+                    chat_id=target_user_id,
+                    text="🔒 **Your support ticket has been closed.** Contact us again anytime if you need help!"
+                )
+            if topic_id in topic_users:
+                del topic_users[topic_id]
             await message.reply_text("🔒 **Ticket Closed Successfully!**")
-            await client.send_message(
-                chat_id=target_user_id,
-                text="🔒 **Your support ticket has been closed.** Contact us again anytime if you need help!"
-            )
         except Exception as e:
             print(f"CLOSE ERROR: {e}")
         return
 
     if text.startswith("/block"):
-        blocked_users.add(target_user_id)
-        await message.reply_text(f"🚫 User `{target_user_id}` has been blocked.")
+        if target_user_id and target_user_id != 000000:
+            blocked_users.add(target_user_id)
+            await message.reply_text(f"🚫 User `{target_user_id}` has been blocked.")
+        else:
+            await message.reply_text("⚠️ Could not identify user for this topic.")
         return
 
     if text.startswith("/unblock"):
-        if target_user_id in blocked_users:
-            blocked_users.remove(target_user_id)
-            await message.reply_text(f"✅ User `{target_user_id}` has been unblocked.")
+        if target_user_id and target_user_id != 000000:
+            if target_user_id in blocked_users:
+                blocked_users.remove(target_user_id)
+                await message.reply_text(f"✅ User `{target_user_id}` has been unblocked.")
+            else:
+                await message.reply_text("⚠️ User is not blocked.")
         else:
-            await message.reply_text("⚠️ User is not blocked.")
+            await message.reply_text("⚠️ Could not identify user.")
         return
 
     if text.startswith("/userinfo"):
@@ -216,10 +234,15 @@ async def handle_admin_actions(client: Client, message: Message):
             f"📊 **User Details:**\n"
             f"🆔 User ID: `{target_user_id}`\n"
             f"📌 Topic ID: `{topic_id}`\n"
-            f"🚫 Blocked Status: {target_user_id in blocked_users}"
+            f"🚫 Blocked Status: {target_user_id in blocked_users if target_user_id else 'Unknown'}"
         )
         return
 
+    if not target_user_id or target_user_id == 000000:
+        await message.reply_text("⚠️ Error: Is topic ke user ka data memory mein nahi mila (bot restart hua hoga). Naye message par ye theek ho jayega.")
+        return
+
+    # Anonymous Admin Reply
     try:
         await client.copy_message(
             chat_id=target_user_id,
@@ -231,6 +254,6 @@ async def handle_admin_actions(client: Client, message: Message):
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
-    print("Starting EKAKI Support Bot Client with full compatibility...")
+    print("Starting EKAKI Support Bot Client with optimized UX...")
     bot.run()
-    
+            
