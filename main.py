@@ -27,7 +27,7 @@ except ValueError:
     LOG_GROUP_ID = 0
 
 bot = Client(
-    "ekaki_support_bot_final_v4",
+    "ekaki_support_bot_final_v5",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=CONTACT_BOT_TOKEN
@@ -92,7 +92,6 @@ async def handle_user_msg(client: Client, message: Message):
 
     if not topic_id:
         try:
-            # Group chat ko pehle fetch karke cache karenge taaki Peer id invalid error na aaye
             chat_obj = await client.get_chat(LOG_GROUP_ID)
             peer = await client.resolve_peer(chat_obj.id)
             
@@ -119,9 +118,10 @@ async def handle_user_msg(client: Client, message: Message):
                 user_topics[user_id] = topic_id
                 topic_users[topic_id] = user_id
                 
+                # Using reply_to_message_id for 100% compatibility
                 await client.send_message(
                     chat_id=LOG_GROUP_ID,
-                    message_thread_id=topic_id,
+                    reply_to_message_id=topic_id,
                     text=f"🔔 **New Support Ticket Opened!**\n👤 User: {user_name} (ID: `{user_id}`)"
                 )
         except Exception as e:
@@ -130,7 +130,13 @@ async def handle_user_msg(client: Client, message: Message):
     sent = False
     if topic_id:
         try:
-            await message.copy(chat_id=LOG_GROUP_ID, message_thread_id=topic_id)
+            # Using client.copy_message with reply_to_message_id to avoid keyword errors
+            await client.copy_message(
+                chat_id=LOG_GROUP_ID,
+                from_chat_id=message.chat.id,
+                message_id=message.id,
+                reply_to_message_id=topic_id
+            )
             sent = True
         except Exception as e:
             print(f"COPY ERROR: {e}")
@@ -149,7 +155,7 @@ async def handle_admin_actions(client: Client, message: Message):
     if message.service or (message.from_user and message.from_user.is_bot):
         return
 
-    topic_id = getattr(message, "message_thread_id", None)
+    topic_id = getattr(message, "reply_to_message_id", None) or getattr(message, "message_thread_id", None)
     text = message.text or message.caption or ""
 
     if text.startswith("/broadcast") and message.reply_to_message:
@@ -158,7 +164,7 @@ async def handle_admin_actions(client: Client, message: Message):
         bc_msg = message.reply_to_message
         for uid in list(all_users):
             try:
-                await bc_msg.copy(chat_id=uid)
+                await client.copy_message(chat_id=uid, from_chat_id=bc_msg.chat.id, message_id=bc_msg.id)
                 success += 1
             except Exception:
                 fail += 1
@@ -215,27 +221,16 @@ async def handle_admin_actions(client: Client, message: Message):
         return
 
     try:
-        await message.copy(chat_id=target_user_id)
+        await client.copy_message(
+            chat_id=target_user_id,
+            from_chat_id=message.chat.id,
+            message_id=message.id
+        )
     except Exception as e:
         print(f"ADMIN REPLY ERROR: {e}")
 
-async def startup_tasks():
-    # Bot startup hote hi group ko cache karne ki koshish karega
-    if LOG_GROUP_ID != 0:
-        try:
-            await bot.get_chat(LOG_GROUP_ID)
-            print("LOG_GROUP_ID successfully cached!")
-        except Exception as e:
-            print(f"Startup Cache Error (Check LOG_GROUP_ID & Bot Admin status): {e}")
-
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
-    print("Starting EKAKI Support Bot Client...")
-    
-    # Startup task run karne ke liye client start handler
-    @bot.on_raw_update()
-    async def startup_trigger(client, update, users, chats):
-        pass # placeholder to keep connection active
-
+    print("Starting EKAKI Support Bot Client with full compatibility...")
     bot.run()
     
